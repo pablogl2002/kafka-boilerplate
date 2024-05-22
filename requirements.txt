@@ -1,0 +1,7 @@
+kafka-python
+fastapi[all]
+# faust
+faust-streaming
+configloader[all]
+python-dotenv
+Faker
