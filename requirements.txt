@@ -5,3 +5,4 @@ faust-streaming
 configloader[all]
 python-dotenv
 Faker
+confluent-kafka

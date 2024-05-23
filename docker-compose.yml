@@ -1,4 +1,4 @@
----
+version: '3.8'
 services:
   zk:
     image: confluentinc/cp-zookeeper
@@ -9,6 +9,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - kafka_network
 
   broker0:
     image: confluentinc/cp-kafka
@@ -24,45 +26,14 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: 'zk:2181'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker0:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
       KAFKA_NUM_PARTITIONS: 3
-
-  broker1:
-    image: confluentinc/cp-kafka
-    hostname: broker1
-    container_name: broker1
-    depends_on:
-      - zk
-    ports:
-      - "29093:29093"
-      - "9093:9093"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zk:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker1:29093,PLAINTEXT_HOST://localhost:9093
-      KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_NUM_PARTITIONS: 3
-
-  broker2:
-    image: confluentinc/cp-kafka
-    hostname: broker2
-    container_name: broker2
-    depends_on:
-      - zk
-    ports:
-      - "29094:29094"
-      - "9094:9094"
-    environment:
-      KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: 'zk:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker2:29094,PLAINTEXT_HOST://localhost:9094
-      KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - kafka_network
 
   schema-registry:
     image: confluentinc/cp-schema-registry
@@ -70,14 +41,14 @@ services:
     container_name: schema-registry
     depends_on:
       - broker0
-      - broker1
-      - broker2
     ports:
       - "8081:8081"
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker0:29092,broker1:29093,broker2:29094'
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker0:29092'
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks:
+      - kafka_network
 
   kafka-connect:
     image: confluentinc/cp-kafka-connect-base
@@ -85,13 +56,11 @@ services:
     hostname: kafka-connect
     depends_on:
       - broker0
-      - broker1
-      - broker2
       - schema-registry
     ports:
       - "8083:8083"
     environment:
-      CONNECT_BOOTSTRAP_SERVERS: "broker0:29092,broker1:29093,broker2:29094"
+      CONNECT_BOOTSTRAP_SERVERS: "broker0:29092"
       CONNECT_REST_PORT: 8083
       CONNECT_GROUP_ID: kafka-connect
       CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
@@ -103,9 +72,50 @@ services:
       CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
       CONNECT_LOG4J_APPENDER_STDOUT_LAYOUT_CONVERSIONPATTERN: "[%d] %p %X{connector.context}%m (%c:%L)%n"
       CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/data/connect-jars
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+    networks:
+      - kafka_network
 
   cli-tools:
     image: confluentinc/cp-kafka
     container_name: cli-tools
     entrypoint: "sleep infinity"
     restart: always
+    networks:
+      - kafka_network
+
+  control-center:
+    image: provectuslabs/kafka-ui:latest
+    hostname: control-center
+    container_name: control-center
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: broker0
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker0:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zk:2181
+    networks:
+      - kafka_network
+
+  kafka-app:
+    container_name: kafka-app
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    depends_on:
+      - zk
+      - broker0
+      - schema-registry
+      - kafka-connect
+      - cli-tools
+      - control-center
+    environment:
+      KAFKA_NETWORK: broker0:29092
+    networks:
+      - kafka_network
+
+networks:
+  kafka_network:
+    driver: bridge
